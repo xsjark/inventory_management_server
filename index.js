@@ -21,23 +21,6 @@ app.get('/', (req, res) => {
     res.send('Hello World!');
 });
 
-app.get('/protected', async (req, res) => {
-    const idToken = req.headers.authorization;
-
-    if (!idToken) {
-        return res.status(401).send('Unauthorized');
-    }
-
-    try {
-        const decodedToken = await admin.auth().verifyIdToken(idToken.split(' ')[1]);
-        // Token is valid, proceed with the protected action
-        res.status(200).json({ message: 'Protected data' });
-    } catch (error) {
-        console.error('Error verifying token:', error.message);
-        res.status(401).send('Unauthorized');
-    }
-});
-
 app.post('/logout', async (req, res) => {
     const idToken = req.headers.authorization;
 
@@ -72,6 +55,12 @@ app.post('/createProduct', async (req, res) => {
         // Verify the ID token
         const decodedToken = await admin.auth().verifyIdToken(idToken.split(' ')[1]);
         const uid = decodedToken.uid;
+
+        // Check if the user is an admin
+        const role = await getRoleById(uid);
+        if (role !== 'admin') {
+            return res.status(403).send('Forbidden');
+        }
 
         // Extract data from the request body
         const data = req.body;
@@ -111,8 +100,15 @@ app.post('/modifyProduct', async (req, res) => {
     }
 
     try {
+        // Verify the ID token
         const decodedToken = await admin.auth().verifyIdToken(idToken.split(' ')[1]);
         const uid = decodedToken.uid;
+
+        // Check if the user is an admin
+        const role = await getRoleById(uid);
+        if (role !== 'admin') {
+            return res.status(403).send('Forbidden');
+        }
 
         const { uid: productUid, name } = req.body;
         if (!productUid || !name) {
@@ -140,6 +136,12 @@ app.delete('/deleteProduct', async (req, res) => {
         const decodedToken = await admin.auth().verifyIdToken(idToken.split(' ')[1]);
         const uid = decodedToken.uid;
 
+        // Check if the user is an admin
+        const role = await getRoleById(uid);
+        if (role !== 'admin') {
+            return res.status(403).send('Forbidden');
+        }
+
         // Check if the request body contains the UID to delete
         const { uid: productUid } = req.body;
         if (!productUid) {
@@ -159,6 +161,53 @@ app.delete('/deleteProduct', async (req, res) => {
     } catch (error) {
         console.error('Error deleting product:', error.message);
         res.status(500).send('Failed to delete product');
+    }
+});
+
+
+async function getRoleById(userId) {
+    try {
+        // Query Firestore to check if the UID exists in the document
+        const docRef = db.collection('roles').doc('roleAssignment');
+        const doc = await docRef.get();
+
+        // Determine the role based on the document
+        if (doc.exists) {
+            const data = doc.data();
+
+            if (data.admins.includes(userId)) {
+                return 'admin';
+            } else if (data.users.includes(userId)) {
+                return 'user';
+            } else {
+                return 'guest';
+            }
+        } else {
+            throw new Error('Role assignment document not found');
+        }
+    } catch (error) {
+        console.error('Error checking role:', error.message);
+        throw new Error('Failed to check role');
+    }
+}
+
+app.post('/check-role', async (req, res) => {
+    const token = req.headers.authorization;
+    if (!token) {
+        return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    try {
+        // Verify the Firebase token
+        const decodedToken = await admin.auth().verifyIdToken(token.split(' ')[1]);
+        const userId = decodedToken.uid;
+
+        // Get the role based on the user ID
+        const role = await getRoleById(userId);
+        res.json({ role });
+    } catch (error) {
+        console.error('Error checking role:', error.message);
+        res.status(500).json({ error: 'Failed to check role' });
     }
 });
 
