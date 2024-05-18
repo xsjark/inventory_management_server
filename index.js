@@ -282,6 +282,38 @@ app.post('/createWarehouse', async (req, res) => {
     }
 });
 
+app.post('/deleteWarehouse', async (req, res) => {
+    const idToken = req.headers.authorization;
+
+    if (!idToken) {
+        return res.status(401).send('Unauthorized');
+    }
+
+    try {
+        // Verify the ID token
+        const decodedToken = await admin.auth().verifyIdToken(idToken.split(' ')[1]);
+        const uid = decodedToken.uid;
+
+        // Check if the user is an admin
+        const role = await getRoleById(uid);
+        if (role !== 'admin') {
+            return res.status(403).send('Forbidden');
+        }
+
+        // Extract the warehouse ID from the request body
+        const { warehouseId } = req.body;
+
+        // Update the 'disabled' field of the warehouse document
+        await db.collection('warehouses').doc(warehouseId).update({ disabled: true });
+
+        res.status(200).json({ message: 'Warehouse disabled successfully' });
+    } catch (error) {
+        console.error('Error disabling warehouse:', error.message);
+        res.status(500).send('Failed to disable warehouse');
+    }
+});
+
+
   
 app.listen(port, () => {
     console.log(`Server running at http://localhost:${port}`);
