@@ -88,6 +88,36 @@ app.get('/getProducts', async (req, res) => {
     }
 });
 
+app.get('/getWarehouses', async (req, res) => {
+    const idToken = req.headers.authorization;
+
+    if (!idToken) {
+        return res.status(401).send('Unauthorized');
+    }
+
+    try {
+        const decodedToken = await admin.auth().verifyIdToken(idToken.split(' ')[1]);
+        const querySnapshot = await db.collection('warehouses').get();
+        const warehouses = querySnapshot.docs.map(doc => {
+            const data = doc.data();
+            const inventory = Object.entries(data).reduce((acc, [key, value]) => {
+                acc[key] = value;
+                return acc;
+            }, {});
+            return { 
+                id: doc.id, 
+                inventory 
+            };
+        });
+        res.status(200).json(warehouses);
+    } catch (error) {
+        console.error('Error verifying token or fetching warehouses:', error.message);
+        res.status(500).send('Failed to fetch warehouses');
+    }
+});
+
+
+
 app.post('/modifyProduct', async (req, res) => {
     const idToken = req.headers.authorization;
 
