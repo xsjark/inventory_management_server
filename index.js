@@ -202,8 +202,6 @@ app.delete('/deleteProduct', async (req, res) => {
     }
 });
 
-
-
 async function getRoleById(userId) {
     try {
         // Query Firestore to check if the UID exists in the document
@@ -250,6 +248,41 @@ app.post('/check-role', async (req, res) => {
     }
 });
 
+app.post('/createWarehouse', async (req, res) => {
+    const idToken = req.headers.authorization;
+  
+    if (!idToken) {
+      return res.status(401).send('Unauthorized');
+    }
+  
+    try {
+      // Verify the ID token
+      const decodedToken = await admin.auth().verifyIdToken(idToken.split(' ')[1]);
+      const uid = decodedToken.uid;
+  
+      // Check if the user is an admin
+      const role = await getRoleById(uid);
+      if (role !== 'admin') {
+        return res.status(403).send('Forbidden');
+      }
+  
+      // Extract data from the request body
+      const { name } = req.body;
+  
+      // Create a new document in the 'warehouses' collection with the provided name
+      const warehouseRef = await db.collection('warehouses').add({ name, disabled: false });
+
+      // Create a new collection 'inventory' nested under the new warehouse document
+      const inventoryRef = await warehouseRef.collection('inventory').add({});
+
+      res.status(200).json({ message: 'Warehouse created successfully', warehouseId: warehouseRef.id });
+    } catch (error) {
+      console.error('Error creating warehouse:', error.message);
+      res.status(500).send('Failed to create warehouse');
+    }
+});
+
+  
 app.listen(port, () => {
     console.log(`Server running at http://localhost:${port}`);
 });
