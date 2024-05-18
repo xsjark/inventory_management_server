@@ -281,6 +281,41 @@ app.post('/createWarehouse', async (req, res) => {
       res.status(500).send('Failed to create warehouse');
     }
 });
+app.post('/modifyWarehouse', async (req, res) => {
+    const idToken = req.headers.authorization;
+
+    if (!idToken) {
+        return res.status(401).send('Unauthorized');
+    }
+
+    try {
+        // Verify the ID token
+        const decodedToken = await admin.auth().verifyIdToken(idToken.split(' ')[1]);
+        const uid = decodedToken.uid;
+
+        // Check if the user is an admin
+        const role = await getRoleById(uid);
+        if (role !== 'admin') {
+            return res.status(403).send('Forbidden');
+        }
+
+        // Extract the warehouse ID and new name from the request body
+        const { warehouseId, name } = req.body;
+
+        if (!warehouseId || !name) {
+            return res.status(400).send('Bad Request: warehouseId and name are required');
+        }
+
+        // Update the name field of the warehouse document
+        await db.collection('warehouses').doc(warehouseId).update({ name });
+
+        res.status(200).json({ message: 'Warehouse name updated successfully' });
+    } catch (error) {
+        console.error('Error updating warehouse name:', error.message);
+        res.status(500).send('Failed to update warehouse name');
+    }
+});
+
 
 app.post('/deleteWarehouse', async (req, res) => {
     const idToken = req.headers.authorization;
