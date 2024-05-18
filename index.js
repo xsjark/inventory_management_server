@@ -88,6 +88,19 @@ app.get('/getProducts', async (req, res) => {
     }
 });
 
+async function getNestedCollections(ref, result = []) {
+    const collections = await ref.listCollections();
+    for (const coll of collections) {
+        const docs = await coll.get();
+        const data = docs.docs.map(doc => doc.data());
+        result.push({ [coll.id]: data });
+        for (const doc of docs.docs) {
+            await getNestedCollections(doc.ref, result);
+        }
+    }
+    return result;
+}
+
 app.get('/getWarehouses', async (req, res) => {
     const idToken = req.headers.authorization;
 
@@ -98,23 +111,20 @@ app.get('/getWarehouses', async (req, res) => {
     try {
         const decodedToken = await admin.auth().verifyIdToken(idToken.split(' ')[1]);
         const querySnapshot = await db.collection('warehouses').get();
-        const warehouses = querySnapshot.docs.map(doc => {
+        const warehouses = [];
+        for (const doc of querySnapshot.docs) {
             const data = doc.data();
-            const inventory = Object.entries(data).reduce((acc, [key, value]) => {
-                acc[key] = value;
-                return acc;
-            }, {});
-            return { 
-                id: doc.id, 
-                inventory 
-            };
-        });
+            const nestedCollections = await getNestedCollections(doc.ref);
+            data.nestedCollections = nestedCollections;
+            warehouses.push(data);
+        }
         res.status(200).json(warehouses);
     } catch (error) {
         console.error('Error verifying token or fetching warehouses:', error.message);
         res.status(500).send('Failed to fetch warehouses');
     }
 });
+
 
 
 
