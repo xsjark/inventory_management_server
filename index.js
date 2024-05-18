@@ -116,6 +116,7 @@ app.get('/getWarehouses', async (req, res) => {
             const data = doc.data();
             const nestedCollections = await getNestedCollections(doc.ref);
             data.nestedCollections = nestedCollections;
+            data.id = doc.id; // Add the warehouse document ID
             warehouses.push(data);
         }
         res.status(200).json(warehouses);
@@ -124,6 +125,7 @@ app.get('/getWarehouses', async (req, res) => {
         res.status(500).send('Failed to fetch warehouses');
     }
 });
+
 
 
 
