@@ -150,15 +150,16 @@ app.delete('/deleteProduct', async (req, res) => {
             return res.status(404).send('Product not found');
         }
 
-        // Delete the product from Firestore
-        await db.collection('products').doc(productUid).delete();
+        // Update the product to set disabled to false
+        await db.collection('products').doc(productUid).update({ disabled: true });
 
-        res.status(200).send('Product deleted successfully');
+        res.status(200).send('Product disabled successfully');
     } catch (error) {
-        console.error('Error deleting product:', error.message);
-        res.status(500).send('Failed to delete product');
+        console.error('Error disabling product:', error.message);
+        res.status(500).send('Failed to disable product');
     }
 });
+
 
 
 async function getRoleById(userId) {
