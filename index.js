@@ -126,10 +126,6 @@ app.get('/getWarehouses', async (req, res) => {
     }
 });
 
-
-
-
-
 app.post('/modifyProduct', async (req, res) => {
     const idToken = req.headers.authorization;
 
@@ -316,7 +312,6 @@ app.post('/modifyWarehouse', async (req, res) => {
     }
 });
 
-
 app.post('/deleteWarehouse', async (req, res) => {
     const idToken = req.headers.authorization;
 
@@ -345,6 +340,45 @@ app.post('/deleteWarehouse', async (req, res) => {
     } catch (error) {
         console.error('Error disabling warehouse:', error.message);
         res.status(500).send('Failed to disable warehouse');
+    }
+});
+
+app.post('/createCustomer', async (req, res) => {
+    const idToken = req.headers.authorization;
+
+    if (!idToken) {
+        return res.status(401).send('Unauthorized');
+    }
+
+    try {
+        // Verify the ID token
+        const decodedToken = await admin.auth().verifyIdToken(idToken.split(' ')[1]);
+        const uid = decodedToken.uid;
+
+        // Check if the user is an admin
+        const role = await getRoleById(uid);
+        if (role !== 'admin') {
+            return res.status(403).send('Forbidden');
+        }
+
+        // Extract company name from the request body
+        const { companyName } = req.body;
+
+        if (!companyName) {
+            return res.status(400).send('Bad Request: companyName is required');
+        }
+
+        const customerData = {
+            companyName,
+            createdAt: admin.firestore.FieldValue.serverTimestamp()
+        };
+
+        const docRef = await db.collection('customers').add(customerData);
+
+        res.status(200).json({ message: 'Customer created successfully', docId: docRef.id });
+    } catch (error) {
+        console.error('Error creating customer:', error.message);
+        res.status(500).send('Failed to create customer');
     }
 });
 
