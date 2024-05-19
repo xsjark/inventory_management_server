@@ -474,6 +474,59 @@ app.delete('/deleteCustomer', async (req, res) => {
     }
 });
 
+app.post('/modifyProductQuantity', async (req, res) => {
+    const idToken = req.headers.authorization;
+
+    if (!idToken) {
+        return res.status(401).send('Unauthorized');
+    }
+
+    try {
+        // Verify the ID token
+        const decodedToken = await admin.auth().verifyIdToken(idToken.split(' ')[1]);
+        const uid = decodedToken.uid;
+
+        // Check if the user is an admin
+        const role = await getRoleById(uid);
+        if (role !== 'admin') {
+            return res.status(403).send('Forbidden');
+        }
+
+        // Extract the warehouse ID, product ID, and quantity from the request body
+        const { warehouseId, productId, quantity } = req.body;
+
+        if (!warehouseId || !productId || quantity === undefined) {
+            return res.status(400).send('Bad Request: warehouseId, productId, and quantity are required');
+        }
+
+        // Get the reference to the specific product in the inventory collection
+        const productRef = db.collection('warehouses')
+                            .doc(warehouseId)
+                            .collection('inventory')
+                            .where('productId', '==', productId);
+
+        const productSnapshot = await productRef.get();
+        if (productSnapshot.empty) {
+            return res.status(404).send('Product not found in the inventory');
+        }
+
+        const batch = db.batch();
+
+        productSnapshot.forEach((doc) => {
+            const newQuantity = doc.data().quantity + quantity;
+            batch.update(doc.ref, { quantity: newQuantity });
+        });
+
+        await batch.commit();
+
+        res.status(200).json({ message: 'Product quantity updated successfully' });
+    } catch (error) {
+        console.error('Error updating product quantity:', error.message);
+        res.status(500).send('Failed to update product quantity');
+    }
+});
+
+
 app.listen(port, () => {
     console.log(`Server running at http://localhost:${port}`);
 });
