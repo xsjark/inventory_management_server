@@ -277,6 +277,7 @@ app.post('/createWarehouse', async (req, res) => {
       res.status(500).send('Failed to create warehouse');
     }
 });
+
 app.post('/modifyWarehouse', async (req, res) => {
     const idToken = req.headers.authorization;
 
@@ -362,14 +363,15 @@ app.post('/createCustomer', async (req, res) => {
         }
 
         // Extract company name from the request body
-        const { companyName } = req.body;
+        const { name, disabled } = req.body;
 
-        if (!companyName) {
-            return res.status(400).send('Bad Request: companyName is required');
+        if (!name) {
+            return res.status(400).send('Bad Request: Name is required');
         }
 
         const customerData = {
-            companyName,
+            name,
+            disabled,
             createdAt: admin.firestore.FieldValue.serverTimestamp()
         };
 
@@ -382,8 +384,96 @@ app.post('/createCustomer', async (req, res) => {
     }
 });
 
+app.get('/getCustomers', async (req, res) => {
+    const idToken = req.headers.authorization;
 
-  
+    if (!idToken) {
+        return res.status(401).send('Unauthorized');
+    }
+
+    try {
+        const decodedToken = await admin.auth().verifyIdToken(idToken.split(' ')[1]);
+        const querySnapshot = await db.collection('customers').get();
+        const products = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        res.status(200).json(products);
+    } catch (error) {
+        console.error('Error verifying token or fetching products:', error.message);
+        res.status(500).send('Failed to fetch products');
+    }
+});
+
+app.post('/modifyCustomer', async (req, res) => {
+    const idToken = req.headers.authorization;
+
+    if (!idToken) {
+        return res.status(401).send('Unauthorized');
+    }
+
+    try {
+        // Verify the ID token
+        const decodedToken = await admin.auth().verifyIdToken(idToken.split(' ')[1]);
+        const uid = decodedToken.uid;
+
+        // Check if the user is an admin
+        const role = await getRoleById(uid);
+        if (role !== 'admin') {
+            return res.status(403).send('Forbidden');
+        }
+
+        const { uid: customerUid, name } = req.body;
+        if (!customerUid || !name) {
+            return res.status(400).send('Customer UID or name not provided');
+        }
+
+        await db.collection('customers').doc(customerUid).update({ name });
+
+        res.status(200).send('Customer modified successfully');
+    } catch (error) {
+        console.error('Error modifying customer:', error.message);
+        res.status(500).send('Failed to modify customer');
+    }
+});
+
+app.delete('/deleteCustomer', async (req, res) => {
+    const idToken = req.headers.authorization;
+
+    if (!idToken) {
+        return res.status(401).send('Unauthorized');
+    }
+
+    try {
+        // Verify the ID token
+        const decodedToken = await admin.auth().verifyIdToken(idToken.split(' ')[1]);
+        const uid = decodedToken.uid;
+
+        // Check if the user is an admin
+        const role = await getRoleById(uid);
+        if (role !== 'admin') {
+            return res.status(403).send('Forbidden');
+        }
+
+        // Check if the request body contains the UID to delete
+        const { uid: customerUid } = req.body;
+        if (!customerUid) {
+            return res.status(400).send('Customer UID not provided');
+        }
+
+        // Check if the product exists
+        const productDoc = await db.collection('customers').doc(customerUid).get();
+        if (!productDoc.exists) {
+            return res.status(404).send('Product not found');
+        }
+
+        // Update the product to set disabled to false
+        await db.collection('customers').doc(customerUid).update({ disabled: true });
+
+        res.status(200).send('Customer disabled successfully');
+    } catch (error) {
+        console.error('Error disabling customer:', error.message);
+        res.status(500).send('Failed to disable customer');
+    }
+});
+
 app.listen(port, () => {
     console.log(`Server running at http://localhost:${port}`);
 });
