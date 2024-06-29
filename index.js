@@ -477,54 +477,68 @@ app.delete('/deleteCustomer', async (req, res) => {
 app.post('/modifyProductQuantity', async (req, res) => {
     const idToken = req.headers.authorization;
 
-    if (!idToken) {
+    if (!idToken || !idToken.startsWith('Bearer ')) {
+        console.error('Unauthorized: Missing or invalid token');
         return res.status(401).send('Unauthorized');
     }
 
+    const token = idToken.split(' ')[1];
+
     try {
         // Verify the ID token
-        const decodedToken = await admin.auth().verifyIdToken(idToken.split(' ')[1]);
+        const decodedToken = await admin.auth().verifyIdToken(token);
+        console.log('Token verified:', decodedToken);
         const uid = decodedToken.uid;
 
         // Check if the user is an admin
         const role = await getRoleById(uid);
+        console.log('User role:', role);
         if (role !== 'admin') {
+            console.error('Forbidden: User is not an admin');
             return res.status(403).send('Forbidden');
         }
 
-        // Extract the warehouse ID, product ID, and quantity from the request body
-        const { warehouseId, productId, quantity } = req.body;
+        // Extract the warehouse ID and updates from the request body
+        const { warehouseId, updates } = req.body;
+        console.log('Request body:', req.body);
 
-        if (!warehouseId || !productId || quantity === undefined) {
-            return res.status(400).send('Bad Request: warehouseId, productId, and quantity are required');
-        }
-
-        // Get the reference to the specific product in the inventory collection
-        const productRef = db.collection('warehouses')
-                            .doc(warehouseId)
-                            .collection('inventory')
-                            .where('productId', '==', productId);
-
-        const productSnapshot = await productRef.get();
-        if (productSnapshot.empty) {
-            return res.status(404).send('Product not found in the inventory');
+        if (!warehouseId || !Array.isArray(updates) || updates.length === 0) {
+            console.error('Bad Request: Invalid warehouseId or updates');
+            return res.status(400).send('Bad Request: warehouseId and updates are required');
         }
 
         const batch = db.batch();
 
-        productSnapshot.forEach((doc) => {
-            const newQuantity = doc.data().quantity + quantity;
-            batch.update(doc.ref, { quantity: newQuantity });
-        });
+        for (const { productId, quantity } of updates) {
+            console.log('Updating product:', productId, 'with quantity:', quantity);
+            const productRef = db.collection('warehouses')
+                                .doc(warehouseId)
+                                .collection('inventory')
+                                .where('productId', '==', productId);
+
+            const productSnapshot = await productRef.get();
+            if (productSnapshot.empty) {
+                console.error('Product not found:', productId);
+                return res.status(404).send('Product not found in the inventory');
+            }
+
+            productSnapshot.forEach((doc) => {
+                const currentQuantity = parseInt(doc.data().quantity, 10);
+                const newQuantity = currentQuantity + parseInt(quantity, 10);
+                console.log('Updating document:', doc.id, 'with new quantity:', newQuantity);
+                batch.update(doc.ref, { quantity: newQuantity });
+            });
+        }
 
         await batch.commit();
-
-        res.status(200).json({ message: 'Product quantity updated successfully' });
+        console.log('Batch commit successful');
+        res.status(200).json({ message: 'Product quantities updated successfully' });
     } catch (error) {
-        console.error('Error updating product quantity:', error.message);
-        res.status(500).send('Failed to update product quantity');
+        console.error('Error updating product quantities:', error.message);
+        res.status(500).send('Failed to update product quantities');
     }
 });
+
 
 
 app.listen(port, () => {
