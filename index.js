@@ -518,16 +518,23 @@ app.post('/modifyProductQuantity', async (req, res) => {
 
             const productSnapshot = await productRef.get();
             if (productSnapshot.empty) {
-                console.error('Product not found:', productId);
-                return res.status(404).send('Product not found in the inventory');
-            }
+                // Product not found, add it to the inventory
+                const newProductRef = db.collection('warehouses')
+                                      .doc(warehouseId)
+                                      .collection('inventory')
+                                      .doc(); // Auto-generated ID
 
-            productSnapshot.forEach((doc) => {
-                const currentQuantity = parseInt(doc.data().quantity, 10);
-                const newQuantity = currentQuantity + parseInt(quantity, 10);
-                console.log('Updating document:', doc.id, 'with new quantity:', newQuantity);
-                batch.update(doc.ref, { quantity: newQuantity });
-            });
+                batch.set(newProductRef, { productId, quantity });
+                console.log('Added new product:', productId, 'with quantity:', quantity);
+            } else {
+                // Product found, update its quantity
+                productSnapshot.forEach((doc) => {
+                    const currentQuantity = parseInt(doc.data().quantity, 10);
+                    const newQuantity = currentQuantity + parseInt(quantity, 10);
+                    console.log('Updating existing product:', doc.id, 'with new quantity:', newQuantity);
+                    batch.update(doc.ref, { quantity: newQuantity });
+                });
+            }
         }
 
         await batch.commit();
@@ -538,8 +545,6 @@ app.post('/modifyProductQuantity', async (req, res) => {
         res.status(500).send('Failed to update product quantities');
     }
 });
-
-
 
 app.listen(port, () => {
     console.log(`Server running at http://localhost:${port}`);
