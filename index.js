@@ -474,6 +474,25 @@ app.delete('/deleteCustomer', async (req, res) => {
     }
 });
 
+async function getProductName(productId) {
+    try {
+        const productDoc = await db.collection('products')
+                                 .doc(productId)
+                                 .get();
+
+        if (!productDoc.exists) {
+            return null; // Product not found
+        } else {
+            // Return the product name
+            return productDoc.data().name;
+        }
+    } catch (error) {
+        console.error('Error fetching product:', error.message);
+        throw error;
+    }
+}
+
+
 app.post('/modifyProductQuantity', async (req, res) => {
     const idToken = req.headers.authorization;
 
@@ -519,13 +538,14 @@ app.post('/modifyProductQuantity', async (req, res) => {
             const productSnapshot = await productRef.get();
             if (productSnapshot.empty) {
                 // Product not found, add it to the inventory
+                const name = await getProductName(productId);
                 const newProductRef = db.collection('warehouses')
                                       .doc(warehouseId)
                                       .collection('inventory')
                                       .doc(); // Auto-generated ID
 
-                batch.set(newProductRef, { productId, quantity });
-                console.log('Added new product:', productId, 'with quantity:', quantity);
+                batch.set(newProductRef, { productId, quantity, name });
+                console.log('Added new product:', productId, 'with quantity:', quantity, 'with name:', name);
             } else {
                 // Product found, update its quantity
                 productSnapshot.forEach((doc) => {
