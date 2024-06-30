@@ -566,6 +566,381 @@ app.post('/modifyProductQuantity', async (req, res) => {
     }
 });
 
+// Add this function at the top of your file or in a separate utility file
+async function getCompanyName(companyUid) {
+    try {
+        const companyDoc = await admin.firestore().collection('customers')
+                                 .doc(companyUid)
+                                 .get();
+
+        if (!companyDoc.exists) {
+            return null; // Company not found
+        } else {
+            // Return the company name
+            return companyDoc.data().name;
+        }
+    } catch (error) {
+        console.error('Error fetching company:', error.message);
+        throw error;
+    }
+}
+
+app.post('/createInboundInvoice', async (req, res) => {
+    const idToken = req.headers.authorization;
+
+    if (!idToken || !idToken.startsWith('Bearer ')) {
+        console.error('Unauthorized: Missing or invalid token');
+        return res.status(401).send('Unauthorized');
+    }
+
+    const token = idToken.split(' ')[1];
+
+    try {
+        // Verify the ID token
+        const decodedToken = await admin.auth().verifyIdToken(token);
+        console.log('Token verified:', decodedToken);
+        const uid = decodedToken.uid;
+
+        // Check if the user is an admin
+        const role = await getRoleById(uid);
+        console.log('User role:', role);
+        if (role !== 'admin') {
+            console.error('Forbidden: User is not an admin');
+            return res.status(403).send('Forbidden');
+        }
+
+        // Extract the invoice details from the request body
+        const { companyUid, products, warehouseId } = req.body;
+        console.log('Request body:', req.body);
+
+        if (!companyUid || !Array.isArray(products) || products.length === 0 || !warehouseId) {
+            console.error('Bad Request: Invalid companyUid, products, or warehouseId');
+            return res.status(400).send('Bad Request: companyUid, products, and warehouseId are required');
+        }
+
+        // Validate products array
+        for (const product of products) {
+            if (!product.productId || typeof product.quantity !== 'number') {
+                console.error('Bad Request: Invalid product structure');
+                return res.status(400).send('Bad Request: Each product must have a productId and quantity');
+            }
+        }
+
+        // Get company name
+        const companyName = await getCompanyName(companyUid);
+        if (!companyName) {
+            console.error('Bad Request: Company not found');
+            return res.status(400).send('Bad Request: Company not found');
+        }
+
+        // Create a new invoice document
+        const invoiceRef = admin.firestore().collection('inbound_invoices').doc();
+
+        const invoiceData = {
+            company: {
+                uid: companyUid,
+                name: companyName
+            },
+            products: products,  // Array of objects with productId and quantity
+            warehouseId: warehouseId,
+            createdOn: admin.firestore.FieldValue.serverTimestamp(),
+            createdBy: uid,  // Adding the ID of the admin who created the invoice
+            disabled: false
+        };
+
+        await invoiceRef.set(invoiceData);
+        console.log('Invoice created successfully:', invoiceRef.id);
+
+        res.status(200).json({ 
+            message: 'Invoice created successfully', 
+            invoiceId: invoiceRef.id 
+        });
+    } catch (error) {
+        console.error('Error creating invoice:', error.message);
+        res.status(500).send('Failed to create invoice');
+    }
+});
+
+app.get('/getInvoices', async (req, res) => {
+    const idToken = req.headers.authorization;
+
+    if (!idToken || !idToken.startsWith('Bearer ')) {
+        console.error('Unauthorized: Missing or invalid token');
+        return res.status(401).send('Unauthorized');
+    }
+
+    const token = idToken.split(' ')[1];
+
+    try {
+        // Verify the ID token
+        const decodedToken = await admin.auth().verifyIdToken(token);
+        console.log('Token verified:', decodedToken);
+        const uid = decodedToken.uid;
+
+        // Check if the user is an admin (optional, remove if not needed)
+        const role = await getRoleById(uid);
+        console.log('User role:', role);
+        if (role !== 'admin') {
+            console.error('Forbidden: User is not an admin');
+            return res.status(403).send('Forbidden');
+        }
+
+        // Fetch all invoices
+        const querySnapshot = await admin.firestore().collection('inbound_invoices').get();
+        const invoices = querySnapshot.docs.map(doc => ({
+            id: doc.id,
+            ...doc.data(),
+            createdOn: doc.data().createdOn ? doc.data().createdOn.toDate() : null
+        }));
+
+        console.log(`Fetched ${invoices.length} invoices`);
+        res.status(200).json(invoices);
+    } catch (error) {
+        console.error('Error verifying token or fetching invoices:', error.message);
+        res.status(500).send('Failed to fetch invoices');
+    }
+});
+
+app.post('/deleteInboundInvoice', async (req, res) => {
+    const idToken = req.headers.authorization;
+
+    if (!idToken || !idToken.startsWith('Bearer ')) {
+        console.error('Unauthorized: Missing or invalid token');
+        return res.status(401).send('Unauthorized');
+    }
+
+    const token = idToken.split(' ')[1];
+
+    try {
+        // Verify the ID token
+        const decodedToken = await admin.auth().verifyIdToken(token);
+        console.log('Token verified:', decodedToken);
+        const uid = decodedToken.uid;
+
+        // Check if the user is an admin
+        const role = await getRoleById(uid);
+        console.log('User role:', role);
+        if (role !== 'admin') {
+            console.error('Forbidden: User is not an admin');
+            return res.status(403).send('Forbidden');
+        }
+
+        // Extract the invoice ID from the request body
+        const { invoiceId } = req.body;
+        console.log('Request body:', req.body);
+
+        if (!invoiceId) {
+            console.error('Bad Request: Missing invoiceId');
+            return res.status(400).send('Bad Request: invoiceId is required');
+        }
+
+        // Get a reference to the invoice document
+        const invoiceRef = admin.firestore().collection('inbound_invoices').doc(invoiceId);
+
+        // Check if the invoice exists
+        const doc = await invoiceRef.get();
+        if (!doc.exists) {
+            console.error('Not Found: Invoice does not exist');
+            return res.status(404).send('Not Found: Invoice does not exist');
+        }
+
+        // Update the disabled field to true
+        await invoiceRef.update({
+            disabled: true,
+            disabledOn: admin.firestore.FieldValue.serverTimestamp(),
+            disabledBy: uid
+        });
+
+        console.log('Invoice soft deleted successfully:', invoiceId);
+
+        res.status(200).json({ 
+            message: 'Invoice soft deleted successfully', 
+            invoiceId: invoiceId 
+        });
+    } catch (error) {
+        console.error('Error soft deleting invoice:', error.message);
+        res.status(500).send('Failed to soft delete invoice');
+    }
+});
+
+app.post('/createOutboundInvoice', async (req, res) => {
+    const idToken = req.headers.authorization;
+
+    if (!idToken || !idToken.startsWith('Bearer ')) {
+        console.error('Unauthorized: Missing or invalid token');
+        return res.status(401).json({ error: 'Unauthorized: Missing or invalid token' });
+    }
+
+    const token = idToken.split(' ')[1];
+
+    try {
+        // Verify the ID token
+        const decodedToken = await admin.auth().verifyIdToken(token);
+        console.log('Token verified:', decodedToken);
+        const uid = decodedToken.uid;
+
+        // Check if the user is an admin
+        const role = await getRoleById(uid);
+        console.log('User role:', role);
+        if (role !== 'admin') {
+            console.error('Forbidden: User is not an admin');
+            return res.status(403).json({ error: 'Forbidden: User is not an admin' });
+        }
+
+        // Extract the invoice details from the request body
+        const { companyUid, products, warehouseId } = req.body;
+        console.log('Request body:', req.body);
+
+        if (!companyUid || !Array.isArray(products) || products.length === 0 || !warehouseId) {
+            console.error('Bad Request: Invalid companyUid, products, or warehouseId');
+            return res.status(400).json({ error: 'Bad Request: companyUid, products, and warehouseId are required' });
+        }
+
+        // Validate products array
+        for (const product of products) {
+            if (!product.productId || typeof product.quantity !== 'number') {
+                console.error('Bad Request: Invalid product structure');
+                return res.status(400).json({ error: 'Bad Request: Each product must have a productId and quantity' });
+            }
+        }
+
+        // Get company name
+        const companyName = await getCompanyName(companyUid);
+        if (!companyName) {
+            console.error('Bad Request: Company not found');
+            return res.status(400).json({ error: 'Bad Request: Company not found' });
+        }
+
+        // Create a new outbound invoice document
+        const invoiceRef = admin.firestore().collection('outbound_invoices').doc();
+
+        const invoiceData = {
+            company: {
+                uid: companyUid,
+                name: companyName
+            },
+            products: products,  // Array of objects with productId and quantity
+            warehouseId: warehouseId,
+            createdOn: admin.firestore.FieldValue.serverTimestamp(),
+            createdBy: uid,  // Adding the ID of the admin who created the invoice
+            disabled: false
+        };
+
+        await invoiceRef.set(invoiceData);
+        console.log('Outbound invoice created successfully:', invoiceRef.id);
+
+        res.status(200).json({ 
+            message: 'Outbound invoice created successfully', 
+            invoiceId: invoiceRef.id 
+        });
+    } catch (error) {
+        console.error('Error creating outbound invoice:', error.message);
+        res.status(500).json({ error: `Failed to create outbound invoice: ${error.message}` });
+    }
+});
+
+app.get('/getOutboundInvoices', async (req, res) => {
+    const idToken = req.headers.authorization;
+
+    if (!idToken || !idToken.startsWith('Bearer ')) {
+        console.error('Unauthorized: Missing or invalid token');
+        return res.status(401).send('Unauthorized');
+    }
+
+    const token = idToken.split(' ')[1];
+
+    try {
+        // Verify the ID token
+        const decodedToken = await admin.auth().verifyIdToken(token);
+        console.log('Token verified:', decodedToken);
+        const uid = decodedToken.uid;
+
+        // Check if the user is an admin
+        const role = await getRoleById(uid);
+        console.log('User role:', role);
+        if (role !== 'admin') {
+            console.error('Forbidden: User is not an admin');
+            return res.status(403).send('Forbidden');
+        }
+
+        // Fetch outbound invoices
+        const querySnapshot = await admin.firestore().collection('outbound_invoices').get();
+        const outboundInvoices = querySnapshot.docs.map(doc => ({
+            id: doc.id,
+            ...doc.data(),
+            createdOn: doc.data().createdOn ? doc.data().createdOn.toDate() : null
+        }));
+
+        console.log(`Fetched ${outboundInvoices.length} outbound invoices`);
+        res.status(200).json(outboundInvoices);
+    } catch (error) {
+        console.error('Error fetching outbound invoices:', error.message);
+        res.status(500).send('Failed to fetch outbound invoices');
+    }
+});
+
+app.post('/deleteOutboundInvoice', async (req, res) => {
+    const idToken = req.headers.authorization;
+
+    if (!idToken || !idToken.startsWith('Bearer ')) {
+        console.error('Unauthorized: Missing or invalid token');
+        return res.status(401).send('Unauthorized');
+    }
+
+    const token = idToken.split(' ')[1];
+
+    try {
+        // Verify the ID token
+        const decodedToken = await admin.auth().verifyIdToken(token);
+        console.log('Token verified:', decodedToken);
+        const uid = decodedToken.uid;
+
+        // Check if the user is an admin
+        const role = await getRoleById(uid);
+        console.log('User role:', role);
+        if (role !== 'admin') {
+            console.error('Forbidden: User is not an admin');
+            return res.status(403).send('Forbidden');
+        }
+
+        // Extract the invoice ID from the request body
+        const { invoiceId } = req.body;
+        console.log('Request body:', req.body);
+
+        if (!invoiceId) {
+            console.error('Bad Request: Missing invoiceId');
+            return res.status(400).send('Bad Request: invoiceId is required');
+        }
+
+        // Get a reference to the invoice document
+        const invoiceRef = admin.firestore().collection('outbound_invoices').doc(invoiceId);
+
+        // Check if the invoice exists
+        const doc = await invoiceRef.get();
+        if (!doc.exists) {
+            console.error('Not Found: Outbound invoice does not exist');
+            return res.status(404).send('Not Found: Outbound invoice does not exist');
+        }
+
+        // Update the disabled field to true
+        await invoiceRef.update({
+            disabled: true,
+            disabledOn: admin.firestore.FieldValue.serverTimestamp(),
+            disabledBy: uid
+        });
+
+        console.log('Outbound invoice soft deleted successfully:', invoiceId);
+
+        res.status(200).json({ 
+            message: 'Outbound invoice soft deleted successfully', 
+            invoiceId: invoiceId 
+        });
+    } catch (error) {
+        console.error('Error soft deleting outbound invoice:', error.message);
+        res.status(500).send('Failed to soft delete outbound invoice');
+    }
+});
+
 app.listen(port, () => {
     console.log(`Server running at http://localhost:${port}`);
 });
