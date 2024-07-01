@@ -109,19 +109,34 @@ app.get('/getWarehouses', async (req, res) => {
     }
 
     try {
+        // Verify the token
         const decodedToken = await admin.auth().verifyIdToken(idToken.split(' ')[1]);
+
+        // Fetch warehouses
         const querySnapshot = await db.collection('warehouses').get();
-        const warehouses = [];
-        for (const doc of querySnapshot.docs) {
+
+        // Process warehouses in parallel
+        const warehousePromises = querySnapshot.docs.map(async (doc) => {
             const data = doc.data();
-            const nestedCollections = await getNestedCollections(doc.ref);
-            data.nestedCollections = nestedCollections;
             data.id = doc.id; // Add the warehouse document ID
-            warehouses.push(data);
-        }
+
+            // Fetch nested collections
+            try {
+                data.nestedCollections = await getNestedCollections(doc.ref);
+            } catch (error) {
+                console.error(`Error fetching nested collections for warehouse ${doc.id}:`, error);
+                data.nestedCollections = []; // Set to empty array in case of error
+            }
+
+            return data;
+        });
+
+        // Wait for all warehouse processing to complete
+        const warehouses = await Promise.all(warehousePromises);
+
         res.status(200).json(warehouses);
     } catch (error) {
-        console.error('Error verifying token or fetching warehouses:', error.message);
+        console.error('Error verifying token or fetching warehouses:', error);
         res.status(500).send('Failed to fetch warehouses');
     }
 });
