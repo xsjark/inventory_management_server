@@ -590,7 +590,7 @@ app.post('/createInboundInvoice', async (req, res) => {
 
     if (!idToken || !idToken.startsWith('Bearer ')) {
         console.error('Unauthorized: Missing or invalid token');
-        return res.status(401).send('Unauthorized');
+        return res.status(401).json({ error: 'Unauthorized: Missing or invalid token' });
     }
 
     const token = idToken.split(' ')[1];
@@ -606,7 +606,7 @@ app.post('/createInboundInvoice', async (req, res) => {
         console.log('User role:', role);
         if (role !== 'admin') {
             console.error('Forbidden: User is not an admin');
-            return res.status(403).send('Forbidden');
+            return res.status(403).json({ error: 'Forbidden: User is not an admin' });
         }
 
         // Extract the invoice details from the request body
@@ -615,22 +615,26 @@ app.post('/createInboundInvoice', async (req, res) => {
 
         if (!companyUid || !Array.isArray(products) || products.length === 0 || !warehouseId) {
             console.error('Bad Request: Invalid companyUid, products, or warehouseId');
-            return res.status(400).send('Bad Request: companyUid, products, and warehouseId are required');
+            return res.status(400).json({ error: 'Bad Request: companyUid, products, and warehouseId are required' });
         }
 
-        // Validate products array
-        for (const product of products) {
+        // Validate products array and fetch product names
+        const productsWithNames = await Promise.all(products.map(async (product) => {
             if (!product.productId || typeof product.quantity !== 'number') {
-                console.error('Bad Request: Invalid product structure');
-                return res.status(400).send('Bad Request: Each product must have a productId and quantity');
+                throw new Error('Bad Request: Each product must have a productId and quantity');
             }
-        }
+            const productName = await getProductName(product.productId);
+            if (!productName) {
+                throw new Error(`Product not found: ${product.productId}`);
+            }
+            return { ...product, name: productName };
+        }));
 
         // Get company name
         const companyName = await getCompanyName(companyUid);
         if (!companyName) {
             console.error('Bad Request: Company not found');
-            return res.status(400).send('Bad Request: Company not found');
+            return res.status(400).json({ error: 'Bad Request: Company not found' });
         }
 
         // Create a new invoice document
@@ -641,7 +645,7 @@ app.post('/createInboundInvoice', async (req, res) => {
                 uid: companyUid,
                 name: companyName
             },
-            products: products,  // Array of objects with productId and quantity
+            products: productsWithNames,  // Array of objects with productId, quantity, and name
             warehouseId: warehouseId,
             createdOn: admin.firestore.FieldValue.serverTimestamp(),
             createdBy: uid,  // Adding the ID of the admin who created the invoice
@@ -657,7 +661,7 @@ app.post('/createInboundInvoice', async (req, res) => {
         });
     } catch (error) {
         console.error('Error creating invoice:', error.message);
-        res.status(500).send('Failed to create invoice');
+        res.status(500).json({ error: `Failed to create invoice: ${error.message}` });
     }
 });
 
@@ -796,13 +800,17 @@ app.post('/createOutboundInvoice', async (req, res) => {
             return res.status(400).json({ error: 'Bad Request: companyUid, products, and warehouseId are required' });
         }
 
-        // Validate products array
-        for (const product of products) {
+        // Validate products array and fetch product names
+        const productsWithNames = await Promise.all(products.map(async (product) => {
             if (!product.productId || typeof product.quantity !== 'number') {
-                console.error('Bad Request: Invalid product structure');
-                return res.status(400).json({ error: 'Bad Request: Each product must have a productId and quantity' });
+                throw new Error('Bad Request: Each product must have a productId and quantity');
             }
-        }
+            const productName = await getProductName(product.productId);
+            if (!productName) {
+                throw new Error(`Product not found: ${product.productId}`);
+            }
+            return { ...product, name: productName };
+        }));
 
         // Get company name
         const companyName = await getCompanyName(companyUid);
@@ -819,7 +827,7 @@ app.post('/createOutboundInvoice', async (req, res) => {
                 uid: companyUid,
                 name: companyName
             },
-            products: products,  // Array of objects with productId and quantity
+            products: productsWithNames,  // Array of objects with productId, quantity, and name
             warehouseId: warehouseId,
             createdOn: admin.firestore.FieldValue.serverTimestamp(),
             createdBy: uid,  // Adding the ID of the admin who created the invoice
